@@ -31,9 +31,11 @@ def initialize_driver():
     logging.info("Edge WebDriver initialized.")
     return driver
 
-# Function to execute the bot at the scheduled time
+# Function to execute the bot
 def run_bot(action="check"):
-    global driver
+    threading.Thread(target=bot_execution, args=(action,), daemon=True).start()
+
+def bot_execution(action):
     email = email_entry.get().strip()
     password = password_entry.get().strip()
 
@@ -50,7 +52,7 @@ def run_bot(action="check"):
 
         wait = WebDriverWait(driver, 20)
 
-        # Switch to the iframe containing the login form
+        # Switch to iframe containing login form
         wait.until(EC.frame_to_be_available_and_switch_to_it((By.XPATH, "//*[@id='embedded']")))
 
         # Enter email
@@ -67,27 +69,25 @@ def run_bot(action="check"):
         password_field.submit()
         logging.info("Submitted login form.")
 
-        # Wait for login to process
         time.sleep(5)
 
-        # Navigate directly to the new URL
-        driver.get("https://commportal.calltower.com/bg/#line8004476299/main.html#/callmanager#topTabBox=Forwarding")
-        logging.info("Navigated directly to CallManager page.")
+        # Navigate to CallManager page
+        driver.get("https://commportal.calltower.com/bg/#line8005326761/main.html#/callmanager#topTabBox=Forwarding")
+        logging.info("Navigated to CallManager page.")
 
-        # Wait for login to process
-        time.sleep(5)
+        time.sleep(3)
 
         # Switch to the outer iframe
         wait.until(EC.frame_to_be_available_and_switch_to_it((By.ID, "embedded")))
 
         # Switch to the inner iframe containing the checkbox
         wait.until(EC.frame_to_be_available_and_switch_to_it((By.ID, "iFrameResizer0")))
-        logging.info("Switched to the iframe containing the checkbox.")
+        logging.info("Switched to iframe containing checkbox.")
 
-        # Wait for the checkbox to be clickable
-        checkbox = wait.until(EC.element_to_be_clickable((By.XPATH, "/html[1]/body[1]/div[1]/div[1]/div[1]/div[1]/div[3]/div[7]/div[2]/form[1]/div[1]/div[1]/div[1]/div[1]/label[1]/input[1]")))
+        # Wait for checkbox
+        checkbox = wait.until(EC.element_to_be_clickable((By.XPATH, "/html/body/div[1]/div[1]/div/div/div[3]/div[7]/div[2]/form/div/div/div/div/label/input")))
 
-        # Check or uncheck based on action
+        # Check/uncheck
         if action == "check" and not checkbox.is_selected():
             checkbox.click()
             logging.info("Checked the checkbox.")
@@ -95,99 +95,84 @@ def run_bot(action="check"):
             checkbox.click()
             logging.info("Unchecked the checkbox.")
 
-        # Small delay to ensure UI updates before clicking Apply
         time.sleep(2)
 
-        # Switch to the Apply button's iframe
+        # Switch back to Apply button iframe
         driver.switch_to.default_content()
         wait.until(EC.frame_to_be_available_and_switch_to_it((By.ID, "embedded")))
         wait.until(EC.frame_to_be_available_and_switch_to_it((By.ID, "iFrameResizer0")))
 
-        # Find the Apply button
+        # Find Apply button
         apply_button = wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, 'a[onclick="return doSubmit(\'ucfForm\');"]')))
         logging.info("Apply button found.")
 
-        # Ensure the Apply button is visible before clicking
-        driver.execute_script("arguments[0].style.display = 'block'; arguments[0].style.visibility = 'visible';", apply_button)
-
-        # Scroll the Apply button into view
+        # Ensure button visibility
+        driver.execute_script("arguments[0].style.display = 'block'; arguments[0].visibility = 'visible';", apply_button)
         driver.execute_script("arguments[0].scrollIntoView({behavior: 'smooth', block: 'center'});", apply_button)
 
-        # Click Apply (try normal click first, then JS click if needed)
+        # Click Apply
         try:
             apply_button.click()
-            logging.info("Clicked the Apply button successfully using normal click.")
+            logging.info("Clicked Apply button.")
         except Exception:
             driver.execute_script("arguments[0].click();", apply_button)
-            logging.info("Clicked the Apply button using JavaScript.")
+            logging.info("Clicked Apply button using JS.")
 
-        # Show a message indicating success
         messagebox.showinfo("Success", f"Bot action '{action}' completed successfully.")
 
     except Exception as e:
-        logging.error(f"An error occurred: {e}")
-        messagebox.showerror("Error", f"An error occurred: {e}")
+        logging.error(f"Error: {e}")
+        messagebox.showerror("Error", f"Error: {e}")
 
     finally:
         driver.quit()
         logging.info("Browser closed.")
 
-# Get current Eastern Time (EDT/EST handled automatically)
-eastern_tz = pytz.timezone("America/New_York")        
-
-# Function to schedule the bot execution
+# Function to schedule the bot
 def schedule_bot():
-    # Function to schedule the bot execution
     def parse_time(date_str, hour, minute, ampm):
         try:
-            # Ensure inputs are not empty
             if not date_str or not hour or not minute or not ampm:
                 raise ValueError("Missing time inputs")
 
-            # Convert hour and minute to integers
             hour = int(hour)
             minute = int(minute)
 
-            # Convert 12-hour format to 24-hour format
             if ampm == "PM" and hour != 12:
                 hour += 12
             elif ampm == "AM" and hour == 12:
                 hour = 0
 
-            # Format the full datetime
             formatted_time = f"{date_str} {hour:02}:{minute:02}"
             parsed_datetime = datetime.strptime(formatted_time, "%m/%d/%y %H:%M")
 
-            logging.info(f"Parsed Scheduled Time: {parsed_datetime}")
-            return parsed_datetime
+            return eastern_tz.localize(parsed_datetime)
 
         except Exception as e:
             logging.error(f"Error parsing time: {e}")
             return None
 
-
-    # Get values from the UI
     start_time = parse_time(start_date.get(), start_hour.get(), start_minute.get(), start_ampm.get())
     end_time = parse_time(end_date.get(), end_hour.get(), end_minute.get(), end_ampm.get())
 
-
     if not start_time or not end_time:
+        messagebox.showerror("Error", "Invalid start or end time.")
         return
 
-    # Convert times to Eastern Timezone
-    start_time = eastern_tz.localize(start_time)
-    end_time = eastern_tz.localize(end_time)
     current_time = datetime.now(eastern_tz)
 
     if start_time > current_time:
-        threading.Timer((start_time - current_time).total_seconds(), lambda: print("Bot Start Action")).start()
+        delay_start = (start_time - current_time).total_seconds()
+        threading.Timer(delay_start, lambda: run_bot("check")).start()
         logging.info(f"Bot scheduled to start at {start_time.strftime('%I:%M %p %m/%d/%Y')} ET")
 
     if end_time > current_time:
-        threading.Timer((end_time - current_time).total_seconds(), lambda: print("Bot End Action")).start()
+        delay_end = (end_time - current_time).total_seconds()
+        threading.Timer(delay_end, lambda: run_bot("uncheck")).start()
         logging.info(f"Bot scheduled to stop at {end_time.strftime('%I:%M %p %m/%d/%Y')} ET")
 
     messagebox.showinfo("Scheduled", "Bot scheduled successfully!")
+
 
 # Create Tkinter UI
 app = tk.Tk()
@@ -242,7 +227,11 @@ end_ampm.set("AM")  # Default value (AM)
 
 
 # Schedule Button
+# Buttons
 schedule_button = tk.Button(app, text="Schedule", command=schedule_bot)
-schedule_button.grid(row=4, column=0, columnspan=5, pady=10)
+schedule_button.grid(row=4, column=0, pady=10)
+
+run_now_button = tk.Button(app, text="Run Now", command=lambda: run_bot("check"), bg="green", fg="white")
+run_now_button.grid(row=4, column=1, pady=10)
 
 app.mainloop()
